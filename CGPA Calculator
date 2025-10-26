@@ -1,0 +1,196 @@
+# ...existing code...
+import tkinter as tk
+from tkinter import ttk, messagebox
+import statistics
+
+try:
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+    MATPLOTLIB_AVAILABLE = True
+except Exception:
+    MATPLOTLIB_AVAILABLE = False
+
+class CGPACalculatorGUI:
+    def __init__(self, root=None):
+        self.root = root or tk.Tk()
+        self.root.title("CGPA Calculator (4.00 scale)")
+        self.root.geometry("820x560")
+        self.rows = []
+        self._build_ui()
+
+    def _build_ui(self):
+        frm = ttk.Frame(self.root, padding=12)
+        frm.pack(fill="both", expand=True)
+
+        header = ttk.Label(frm, text="Enter marks (0-100) and credit hours for each subject", font=("Segoe UI", 12, "bold"))
+        header.pack(anchor="w")
+
+        table_frame = ttk.Frame(frm)
+        table_frame.pack(fill="x", pady=8)
+
+        headings = ("#", "Subject", "Marks (0-100)", "Credits")
+        for c, h in enumerate(headings):
+            ttk.Label(table_frame, text=h, font=("Segoe UI", 9, "bold")).grid(row=0, column=c, padx=6, pady=4)
+
+        self.rows_container = table_frame
+        # start with 3 rows
+        for _ in range(3):
+            self.add_row()
+
+        btn_frame = ttk.Frame(frm)
+        btn_frame.pack(fill="x", pady=8)
+
+        ttk.Button(btn_frame, text="Add Subject", command=self.add_row).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Remove Last", command=self.remove_row).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Calculate CGPA", command=self.calculate).pack(side="left", padx=12)
+        ttk.Button(btn_frame, text="Clear All", command=self.clear_all).pack(side="left", padx=4)
+
+        result_frame = ttk.LabelFrame(frm, text="Result", padding=10)
+        result_frame.pack(fill="x", pady=8)
+
+        self.result_text = tk.StringVar(value="Enter data and press 'Calculate CGPA'")
+        ttk.Label(result_frame, textvariable=self.result_text, font=("Segoe UI", 10)).pack(anchor="w")
+
+        graph_frame = ttk.LabelFrame(frm, text="Graph (Marks -> Grade Points)", padding=8)
+        graph_frame.pack(fill="both", expand=True, pady=6)
+        self.graph_frame = graph_frame
+
+        if MATPLOTLIB_AVAILABLE:
+            self.figure = Figure(figsize=(6,2.6), dpi=100)
+            self.ax = self.figure.add_subplot(111)
+            self.canvas = FigureCanvasTkAgg(self.figure, master=graph_frame)
+            self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        else:
+            ttk.Label(graph_frame, text="matplotlib not installed — install to see charts (pip install matplotlib)").pack(anchor="center", pady=20)
+
+    def add_row(self):
+        idx = len(self.rows) + 1
+        r = len(self.rows) + 1
+        subject_var = tk.StringVar(value=f"Subject {idx}")
+        marks_var = tk.StringVar(value="0")
+        credit_var = tk.StringVar(value="3")
+
+        col0 = ttk.Label(self.rows_container, text=str(idx))
+        col0.grid(row=r, column=0, padx=6, pady=4)
+
+        col1 = ttk.Entry(self.rows_container, textvariable=subject_var, width=30)
+        col1.grid(row=r, column=1, padx=6, pady=4, sticky="w")
+
+        col2 = ttk.Entry(self.rows_container, textvariable=marks_var, width=12)
+        col2.grid(row=r, column=2, padx=6, pady=4)
+
+        col3 = ttk.Entry(self.rows_container, textvariable=credit_var, width=10)
+        col3.grid(row=r, column=3, padx=6, pady=4)
+
+        self.rows.append((col0, col1, col2, col3, subject_var, marks_var, credit_var))
+
+    def remove_row(self):
+        if not self.rows:
+            return
+        widgets = self.rows.pop()
+        for w in widgets[:4]:
+            w.destroy()
+        # reindex labels
+        for i, row in enumerate(self.rows, start=1):
+            row[0].config(text=str(i))
+
+    def clear_all(self):
+        for widgets in self.rows:
+            for w in widgets[:4]:
+                w.destroy()
+        self.rows.clear()
+        for _ in range(1):
+            self.add_row()
+        self.result_text.set("Cleared. Enter new data and press 'Calculate CGPA'")
+
+    def _parse_float(self, s, name):
+        try:
+            return float(s)
+        except Exception:
+            raise ValueError(f"Invalid number for {name}: '{s}'")
+
+    def calculate(self):
+        subjects = []
+        try:
+            for i, (_, subj_entry, marks_entry, credit_entry, subj_var, marks_var, credit_var) in enumerate(self.rows, start=1):
+                subj = subj_var.get().strip() or f"Subject {i}"
+                marks = self._parse_float(marks_var.get(), f"marks for {subj}")
+                credits = self._parse_float(credit_var.get(), f"credits for {subj}")
+                if not (0 <= marks <= 100):
+                    raise ValueError(f"Marks for '{subj}' must be between 0 and 100.")
+                if credits <= 0:
+                    raise ValueError(f"Credits for '{subj}' must be positive.")
+                gp = self.marks_to_grade_point(marks)
+                subjects.append({"name": subj, "marks": marks, "credits": credits, "gp": gp})
+            if not subjects:
+                raise ValueError("No subjects entered.")
+        except ValueError as e:
+            messagebox.showerror("Input error", str(e))
+            return
+
+        total_weighted = sum(s["gp"] * s["credits"] for s in subjects)
+        total_credits = sum(s["credits"] for s in subjects)
+        cgpa = total_weighted / total_credits if total_credits else 0.0
+        cgpa = round(cgpa, 3)
+
+        remarks = self.remark_for_cgpa(cgpa)
+        avg_marks = round(statistics.mean(s["marks"] for s in subjects), 2)
+        best = max(subjects, key=lambda s: s["gp"])
+        worst = min(subjects, key=lambda s: s["gp"])
+
+        result = (
+            f"Total Credits: {total_credits}    CGPA (4.00 scale): {cgpa:.3f}\n"
+            f"Average Marks: {avg_marks}%    Remark: {remarks}\n"
+            f"Top: {best['name']} ({best['marks']}%, GP={best['gp']:.2f})    "
+            f"Lowest: {worst['name']} ({worst['marks']}%, GP={worst['gp']:.2f})"
+        )
+        self.result_text.set(result)
+        self._draw_chart(subjects)
+
+    def marks_to_grade_point(self, marks):
+        # Linear mapping 0-100 -> 0.00-4.00
+        # This gives a continuous grade point on a 4.00 scale.
+        gp = (marks / 100.0) * 4.0
+        return round(min(max(gp, 0.0), 4.0), 3)
+
+    def remark_for_cgpa(self, cgpa):
+        if cgpa >= 3.5:
+            return "Excellent"
+        if cgpa >= 3.0:
+            return "Very Good"
+        if cgpa >= 2.0:
+            return "Satisfactory"
+        if cgpa >= 1.0:
+            return "Needs Improvement"
+        return "Poor"
+
+    def _draw_chart(self, subjects):
+        names = [s["name"] for s in subjects]
+        marks = [s["marks"] for s in subjects]
+        gps = [s["gp"] for s in subjects]
+
+        if MATPLOTLIB_AVAILABLE:
+            self.ax.clear()
+            x = range(len(subjects))
+            self.ax.bar(x, marks, width=0.4, label="Marks (%)", color="#4c9f70")
+            self.ax.bar([i + 0.4 for i in x], gps, width=0.4, label="Grade Point (0-4)", color="#3778bf")
+            self.ax.set_xticks([i + 0.2 for i in x])
+            self.ax.set_xticklabels(names, rotation=30, ha="right")
+            self.ax.set_ylabel("Value")
+            self.ax.set_ylim(0, max(100, 4.0))
+            self.ax.legend()
+            self.figure.tight_layout()
+            self.canvas.draw()
+        else:
+            # simple textual fallback
+            text = "Subjects | Marks% | GradePoint\n" + "\n".join(f"{s['name']} | {s['marks']} | {s['gp']}" for s in subjects)
+            for child in self.graph_frame.winfo_children():
+                child.destroy()
+            ttk.Label(self.graph_frame, text=text, justify="left", font=("Consolas", 9)).pack(anchor="w")
+
+    def run(self):
+        self.root.mainloop()
+
+if __name__ == "__main__":
+    app = CGPACalculatorGUI()
+    app.run()
