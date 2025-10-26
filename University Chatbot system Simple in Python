@@ -1,0 +1,313 @@
+# Offline Uni Chatbot — GUI only, no API required.
+# Run: python "e:\code\uni_bot_offline.py"
+
+import tkinter as tk
+from tkinter import ttk, scrolledtext, simpledialog, messagebox, filedialog
+import tkinter.font as tkfont
+import datetime
+import json
+import re
+import random
+from difflib import get_close_matches
+
+# --- Simple local data (editable at runtime) ---
+UNIVERSITY = {
+    "name": "VDIM University",
+    "address": "123 Campus Ave",
+    "admissions_email": "admissions@vdim.edu",
+    "phone": "+1-555-0000",
+    "website": "https://www.vdim.edu"
+}
+
+STUDENTS = {
+    "101": {"name": "Alice Nguyen", "program": "BSc Computer Science", "year": "2", "gpa": "3.6"},
+    "102": {"name": "Bob Patel", "program": "BA Economics", "year": "3", "gpa": "3.2"},
+}
+
+COURSES = {
+    "CS101": {"title": "Intro to Programming", "credits": 3, "lecturer": "Dr. Smith"},
+    "CS202": {"title": "Data Structures", "credits": 3, "lecturer": "Dr. Lee"},
+}
+
+# Knowledge base: simple Q -> A mapping (lowercase keys)
+KB = {
+    "admission": f"Admissions: Submit an online application, transcripts, and ID. Contact: {UNIVERSITY['admissions_email']}.",
+    "how to apply": "To apply: choose a program on the website, prepare transcripts, submit the online form, and pay the fee.",
+    "scholarship": "Scholarships: Merit and need-based. Check scholarship portal for deadlines and eligibility.",
+    "fees": "Fees vary by program. Visit the finance page on the university website or contact the finance office.",
+    "timetable": "Timetables are published in the student portal before each semester.",
+    "contact": f"Main contacts:\nAdmissions: {UNIVERSITY['admissions_email']}\nPhone: {UNIVERSITY['phone']}"
+}
+
+
+# --- Response engine (offline) ---
+def find_student_by_id(text):
+    m = re.search(r'\b(?:student|id)\s*[:#]?\s*(\d{2,6})\b', text.lower())
+    if m:
+        sid = m.group(1)
+        return sid, STUDENTS.get(sid)
+    return None, None
+
+
+def find_course_by_code(text):
+    mc = re.search(r'\b([A-Za-z]{2,4}\d{3})\b', text)
+    if mc:
+        code = mc.group(1).upper()
+        return code, COURSES.get(code)
+    return None, None
+
+
+def kb_lookup(text):
+    key = text.strip().lower()
+    # direct key
+    if key in KB:
+        return KB[key]
+    # keyword match
+    for k in KB:
+        if k in key:
+            return KB[k]
+    # fuzzy match
+    matches = get_close_matches(key, KB.keys(), n=1, cutoff=0.6)
+    if matches:
+        return KB[matches[0]] + f"\n\n(Showing result for '{matches[0]}')"
+    return None
+
+
+def offline_answer(text):
+    t = text.strip()
+    if not t:
+        return "Please type a question."
+
+    # greetings
+    if any(g in t.lower() for g in ("hello", "hi", "hey", "good morning", "good evening")):
+        return random.choice([
+            f"Hello — I'm VooiDim Uni Bot. I can help with admissions, courses, fees, scholarships, student lookup and campus info.",
+            "Hi! Ask about admissions, courses (e.g. CS101), scholarships, or type a student ID (e.g. 101)."
+        ])
+
+    # student lookup
+    sid, student = find_student_by_id(t)
+    if sid:
+        if student:
+            return f"✅ Student {sid}\nName: {student['name']}\nProgram: {student['program']}\nYear: {student['year']}  GPA: {student['gpa']}"
+        return f"❌ No student found with ID {sid}."
+
+    # course lookup
+    code, course = find_course_by_code(t)
+    if code:
+        if course:
+            return f"📘 {code} — {course['title']}\nCredits: {course['credits']}\nLecturer: {course['lecturer']}"
+        return f"❌ Course {code} not found."
+
+    # KB lookup
+    kb = kb_lookup(t)
+    if kb:
+        return f"ℹ️ {kb}"
+
+    # patterns: "requirements for <program>"
+    mreq = re.search(r'requirements for ([\w\s0-9+-]+)', t.lower())
+    if mreq:
+        prog = mreq.group(1).strip()
+        return f"Program requirements for '{prog}' vary by program. Typically: transcripts, minimum GPA, language proficiency, and program-specific prerequisites. Check admissions page."
+
+    # fallback
+    suggestions = ", ".join(list(KB.keys())[:4])
+    return ("I don't have an exact match locally. Try keywords like: " + suggestions +
+            ".\nYou can add new Q&A from the menu.")
+
+
+# --- GUI Application ---
+class UniBotGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("VooiDim Uni Bot — Offline")
+        self.geometry("900x620")
+        self.configure(bg="#f3f4f6")
+        self._setup_fonts()
+        self._build_ui()
+        self._welcome_message()
+
+    def _setup_fonts(self):
+        self.title_font = tkfont.Font(family="Segoe UI", size=14, weight="bold")
+        self.msg_font = tkfont.Font(family="Segoe UI", size=11)
+        self.small_font = tkfont.Font(family="Segoe UI", size=9)
+
+    def _build_ui(self):
+        # Header
+        header = tk.Frame(self, bg="#0b1220", height=70)
+        header.pack(fill="x")
+        logo = tk.Canvas(header, width=56, height=56, bg="#0b1220", highlightthickness=0)
+        logo.create_oval(6, 6, 50, 50, fill="#7c3aed", outline="")
+        logo.create_text(28, 30, text="V", fill="white", font=self.title_font)
+        logo.pack(side="left", padx=12, pady=8)
+        tk.Label(header, text="VooiDim Uni Bot — Offline Assistant", bg="#0b1220", fg="white",
+                 font=self.title_font).pack(side="left", padx=6)
+        tk.Label(header, text=UNIVERSITY["website"], bg="#0b1220", fg="#93c5fd", font=self.small_font).pack(side="right", padx=12)
+
+        # Main area
+        main = tk.Frame(self, bg="#f3f4f6")
+        main.pack(fill="both", expand=True, padx=12, pady=10)
+
+        # Chat frame (left)
+        chat_frame = tk.Frame(main, bg="#f3f4f6")
+        chat_frame.pack(side="left", fill="both", expand=True)
+
+        self.chat_display = scrolledtext.ScrolledText(chat_frame, wrap="word", state="disabled",
+                                                      font=self.msg_font, bg="white", padx=8, pady=8)
+        self.chat_display.pack(fill="both", expand=True)
+        # tags emulate message bubbles
+        self.chat_display.tag_configure("user", background="#dbeafe", foreground="#0b3d91", lmargin1=12, lmargin2=12, rmargin=12, spacing3=6)
+        self.chat_display.tag_configure("bot", background="#ecfccb", foreground="#0b6624", lmargin1=12, lmargin2=12, rmargin=12, spacing3=6)
+        self.chat_display.tag_configure("meta", foreground="#6b7280", font=self.small_font)
+
+        # input area
+        input_frame = tk.Frame(self, bg="#f3f4f6")
+        input_frame.pack(fill="x", padx=12, pady=(0,12))
+        self.entry = tk.Entry(input_frame, font=self.msg_font)
+        self.entry.pack(side="left", fill="x", expand=True, padx=(0,8), ipady=6)
+        self.entry.bind("<Return>", lambda e: self.on_send())
+        tk.Button(input_frame, text="Send", width=12, command=self.on_send).pack(side="right")
+        tk.Button(input_frame, text="Ask", width=10, command=self.ask_dialog).pack(side="right", padx=(0,8))
+
+        # Sidebar (right)
+        side = tk.Frame(main, width=280, bg="#fff", bd=1, relief="solid")
+        side.pack(side="right", fill="y", padx=(12,0))
+        side.pack_propagate(False)
+
+        tk.Label(side, text="Quick Actions", bg="#fff", font=self.title_font).pack(anchor="w", padx=12, pady=(12,6))
+        quicks = [("Admissions", "admission"), ("How to Apply", "how to apply"),
+                  ("Scholarships", "scholarship"), ("Fees", "fees"),
+                  ("Timetable", "timetable")]
+        for label, cmd in quicks:
+            b = tk.Button(side, text=label, width=28, anchor="w", command=lambda c=cmd: self.send_text(c))
+            b.pack(padx=12, pady=4)
+
+        tk.Label(side, text="Lookup", bg="#fff", font=self.title_font).pack(anchor="w", padx=12, pady=(12,6))
+        lf = tk.Frame(side, bg="#fff")
+        lf.pack(fill="x", padx=12)
+        tk.Label(lf, text="Student ID:", bg="#fff").grid(row=0, column=0, sticky="w")
+        self.sid_box = tk.Entry(lf, width=10)
+        self.sid_box.grid(row=0, column=1, padx=6)
+        tk.Button(lf, text="Find", command=self.lookup_student).grid(row=0, column=2, padx=6)
+
+        tk.Label(side, text="Course Code:", bg="#fff").pack(anchor="w", padx=12, pady=(8,0))
+        self.course_box = tk.Entry(side, width=20)
+        self.course_box.pack(padx=12, pady=(4,0))
+        tk.Button(side, text="Find Course", command=self.lookup_course).pack(padx=12, pady=6)
+
+        tk.Label(side, text="Knowledge Base", bg="#fff", font=self.title_font).pack(anchor="w", padx=12, pady=(12,6))
+        kb_frame = tk.Frame(side, bg="#fff")
+        kb_frame.pack(fill="x", padx=12)
+        tk.Button(kb_frame, text="Add Q&A", command=self.add_qa).pack(side="left")
+        tk.Button(kb_frame, text="Save KB", command=self.save_kb).pack(side="left", padx=(6,0))
+        tk.Button(kb_frame, text="Load KB", command=self.load_kb).pack(side="left", padx=(6,0))
+
+        tk.Label(side, text="Suggestions:", bg="#fff", font=self.small_font).pack(anchor="w", padx=12, pady=(12,4))
+        suggs = ["How to apply", "Admission", "Scholarship", "CS101", "student 101"]
+        for s in suggs:
+            tk.Label(side, text="• " + s, bg="#fff", anchor="w").pack(fill="x", padx=18)
+
+        tk.Label(side, text="", bg="#fff").pack(expand=True, fill="both")
+        tk.Label(side, text=f"Website: {UNIVERSITY['website']}", bg="#fff", fg="#2563eb", cursor="hand2").pack(anchor="w", padx=12, pady=8)
+
+    def _welcome_message(self):
+        welcome = (f"Welcome to {UNIVERSITY['name']} — VooiDim Uni Bot (offline).\n"
+                   "Ask questions about admissions, courses, scholarships, fees, or lookup students/courses.")
+        self._append_bot(welcome)
+
+    def _timestamp(self):
+        return datetime.datetime.now().strftime("%H:%M")
+
+    def _append_user(self, text):
+        self.chat_display.configure(state="normal")
+        self.chat_display.insert("end", f"You [{self._timestamp()}]\n", ("meta",))
+        self.chat_display.insert("end", text + "\n\n", ("user",))
+        self.chat_display.configure(state="disabled")
+        self.chat_display.see("end")
+
+    def _append_bot(self, text):
+        self.chat_display.configure(state="normal")
+        self.chat_display.insert("end", f"VooiDim Uni Bot [{self._timestamp()}]\n", ("meta",))
+        self.chat_display.insert("end", text + "\n\n", ("bot",))
+        self.chat_display.configure(state="disabled")
+        self.chat_display.see("end")
+
+    # Actions
+    def on_send(self):
+        text = self.entry.get().strip()
+        if not text:
+            return
+        self.entry.delete(0, "end")
+        self._append_user(text)
+        resp = offline_answer(text)
+        # small "typing" effect
+        self.after(150, lambda: self._append_bot(resp))
+
+    def send_text(self, text):
+        self.entry.delete(0, "end")
+        self.entry.insert(0, text)
+        self.on_send()
+
+    def ask_dialog(self):
+        q = simpledialog.askstring("Ask Question", "Type your question:")
+        if q:
+            self.entry.delete(0, "end")
+            self.entry.insert(0, q)
+            self.on_send()
+
+    def lookup_student(self):
+        sid = self.sid_box.get().strip()
+        if not sid:
+            messagebox.showinfo("Lookup", "Enter a student ID (e.g. 101).")
+            return
+        self.send_text(f"student {sid}")
+
+    def lookup_course(self):
+        code = self.course_box.get().strip().upper()
+        if not code:
+            messagebox.showinfo("Lookup", "Enter a course code (e.g. CS101).")
+            return
+        self.send_text(code)
+
+    def add_qa(self):
+        q = simpledialog.askstring("Add Q&A", "Question (short keyword or phrase):")
+        if not q:
+            return
+        a = simpledialog.askstring("Add Q&A", "Answer text:")
+        if not a:
+            return
+        KB[q.strip().lower()] = a.strip()
+        messagebox.showinfo("Added", "Q&A added to knowledge base (in-memory).")
+
+    def save_kb(self):
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files","*.json")], initialfile="kb.json")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"KB": KB, "STUDENTS": STUDENTS, "COURSES": COURSES}, f, indent=2)
+            messagebox.showinfo("Saved", f"Knowledge saved to {path}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def load_kb(self):
+        path = filedialog.askopenfilename(filetypes=[("JSON files","*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "KB" in data:
+                KB.clear(); KB.update({k.lower(): v for k, v in data["KB"].items()})
+            if "STUDENTS" in data:
+                STUDENTS.clear(); STUDENTS.update(data["STUDENTS"])
+            if "COURSES" in data:
+                COURSES.clear(); COURSES.update(data["COURSES"])
+            messagebox.showinfo("Loaded", "Knowledge base, students and courses loaded.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+
+if __name__ == "__main__":
+    app = UniBotGUI()
+    app.mainloop()
